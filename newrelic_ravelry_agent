@@ -1,0 +1,65 @@
+#! /usr/bin/env ruby
+
+#
+# This is an example agent which generates synthetic data.
+# A 1mHz (one cycle every 16 minutes) sin+1, cos+1 and sin+5 wave is generated,
+# using the Unix epoch as the base.
+#
+
+require "rubygems"
+require "bundler/setup"
+require 'net/http'
+
+require "newrelic_plugin"
+
+module ExampleAgent
+
+  class Agent < NewRelic::Plugin::Agent::Base
+
+    agent_guid "com.newrelic.example.ravelry"
+    agent_version "1.0.1"
+    agent_config_options :hertz  # frequency of the periodic functions
+    agent_human_labels("Ravelry Agent") { "Ravelry data" }
+
+    def get_data(endpoint)
+      uri = URI.parse("https://api.ravelry.com/" + endpoint)
+
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+
+      request = Net::HTTP::Get.new(uri.request_uri)
+      request.basic_auth("YOUR_RAVELRY_API_KEY_HERE", "YOUR_RAVELRY_PERSONAL_KEY_HERE")
+      response = http.request(request)
+
+      data = JSON.parse(response.body)
+    end
+
+    def get_project_count(pattern_type='')
+      data = get_data("patterns/search.json?sort=popularity&query=#{pattern_type}")
+      patterns = data["patterns"]
+      most_popular = patterns[0]
+      full_pattern = get_data("patterns/#{most_popular["id"]}.json")
+      project_count = full_pattern['pattern']['projects_count']
+    end
+
+    def poll_cycle
+      pc = get_project_count()
+      report_metric "PROJECT COUNT",     "Most Popular Project", pc
+    end
+
+  end
+
+  #
+  # Register this agent with the component.
+  # The ExampleAgent is the name of the module that defines this
+  # driver (the module must contain at least three classes - a
+  # PollCycle, a Metric and an Agent class, as defined above).
+  #
+  NewRelic::Plugin::Setup.install_agent :example, ExampleAgent
+
+  #
+  # Launch the agent; this never returns.
+  #
+  NewRelic::Plugin::Run.setup_and_run
+
+end
